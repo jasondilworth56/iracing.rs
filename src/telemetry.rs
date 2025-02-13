@@ -434,8 +434,7 @@ impl Sample {
 
         let raw_val = &self.buffer[vs..ve];
 
-        let v: Value;
-        v = match vt {
+        let v: Value = match vt {
             Value::INT(_) => {
                 if vc == 1 {
                     Value::INT(i32::from_le_bytes(raw_val.try_into().unwrap()))
@@ -471,7 +470,7 @@ impl Sample {
             }
             Value::DOUBLE(_) => Value::DOUBLE(f64::from_le_bytes(raw_val.try_into().unwrap())),
             Value::BITS(_) => Value::BITS(u32::from_le_bytes(raw_val.try_into().unwrap())),
-            Value::CHAR(_) => Value::CHAR(raw_val[0] as u8),
+            Value::CHAR(_) => Value::CHAR(raw_val[0]),
             Value::BOOL(_) => {
                 if vc == 1 {
                     Value::BOOL(raw_val[0] > 0)
