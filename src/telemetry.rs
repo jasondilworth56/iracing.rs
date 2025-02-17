@@ -8,7 +8,7 @@ use std::error::Error;
 use std::ffi::CStr;
 use std::fmt::{self, Display};
 use std::io::Result as IOResult;
-use std::mem::transmute;
+use std::marker::PhantomData;
 use std::os::raw::{c_char, c_void};
 use std::os::windows::raw::HANDLE;
 use std::slice::from_raw_parts;
@@ -16,9 +16,9 @@ use std::time::Duration;
 use winapi::shared::minwindef::LPVOID;
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::handleapi::CloseHandle;
-use winapi::um::memoryapi::{MapViewOfFile, OpenFileMappingW, FILE_MAP_READ};
-use winapi::um::minwinbase::LPSECURITY_ATTRIBUTES;
-use winapi::um::synchapi::{CreateEventW, ResetEvent, WaitForSingleObject};
+use winapi::um::memoryapi::{MapViewOfFile, OpenFileMappingW, UnmapViewOfFile, FILE_MAP_READ};
+use winapi::um::synchapi::{OpenEventW, ResetEvent, WaitForSingleObject};
+use winapi::um::winnt::SYNCHRONIZE;
 
 /// System path where the shared memory map is located.
 pub const TELEMETRY_PATH: &str = r"Local\IRSDKMemMapFileName";
@@ -55,10 +55,10 @@ pub struct Header {
 ///
 /// Calling `sample()` on a Blocking interface will block until a new telemetry sample is made available.
 ///
-pub struct Blocking {
+pub struct Blocking<'conn> {
     origin: *const c_void,
-    header: Header,
     event_handle: HANDLE,
+    phantom: PhantomData<&'conn Connection>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -120,7 +120,8 @@ pub struct Sample {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # use iracing::telemetry::{Connection, Value};
 /// # use std::time::Duration;
-/// # let sampler = Connection::new()?.blocking()?;
+/// # let conn = Connection::new()?;
+/// # let sampler = conn.blocking()?;
 /// # let sample = sampler.sample(Duration::from_millis(50))?;
 /// use std::convert::TryInto;
 ///
@@ -135,7 +136,8 @@ pub struct Sample {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # use iracing::telemetry::{Connection, Value};
 /// # use std::time::Duration;
-/// # let sampler = Connection::new()?.blocking()?;
+/// # let conn = Connection::new()?;
+/// # let sampler = conn.blocking()?;
 /// # let sample = sampler.sample(Duration::from_millis(50))?;
 /// match sample.get("some_key") {
 ///     Err(err) => println!("Didn't find that value: {}", err),
@@ -315,10 +317,15 @@ impl fmt::Debug for ValueHeader {
 
 impl Header {
     fn latest_buffer(&self) -> (i32, ValueBuffer) {
-        let mut latest_tick: i32 = 0;
         let mut buffer = self.buffers[0];
+        let mut latest_tick = buffer.ticks;
 
-        for b in self.buffers.iter() {
+        for b in self
+            .buffers
+            .iter()
+            .skip(1)
+            .take((self.n_buffers - 1) as usize)
+        {
             if b.ticks > latest_tick {
                 buffer = *b;
                 latest_tick = b.ticks;
@@ -344,7 +351,7 @@ impl Header {
         content
     }
 
-    pub fn telemetry(&self, from_loc: *const c_void) -> Result<Sample, Box<dyn std::error::Error>> {
+    fn telemetry(&self, from_loc: *const c_void) -> Result<Sample, Box<dyn std::error::Error>> {
         let (tick, vbh) = self.latest_buffer();
         let value_buffer = self.var_buffer(vbh, from_loc);
         let value_header = self.get_var_header(from_loc);
@@ -514,54 +521,38 @@ impl Display for TelemetryError {
 
 impl Error for TelemetryError {}
 
-impl Blocking {
-    pub fn new(location: *const c_void, head: Header) -> std::io::Result<Self> {
+impl<'conn> Blocking<'conn> {
+    fn new(location: *const c_void) -> std::io::Result<Self> {
         let mut event_name: Vec<u16> = DATA_EVENT_NAME.encode_utf16().collect();
         event_name.push(0);
 
-        let sc: LPSECURITY_ATTRIBUTES = unsafe { std::mem::zeroed() };
+        let handle = unsafe {
+            let handle: HANDLE = OpenEventW(SYNCHRONIZE, 0, event_name.as_ptr());
 
-        let handle: HANDLE = unsafe { CreateEventW(sc, 0, 0, event_name.as_ptr()) };
+            if handle.is_null() {
+                let errno = GetLastError() as i32;
+                return Err(std::io::Error::from_raw_os_error(errno));
+            }
 
-        if handle.is_null() {
-            let errno: i32 = unsafe { GetLastError() as i32 };
-
-            return Err(std::io::Error::from_raw_os_error(errno));
-        }
+            handle
+        };
 
         Ok(Blocking {
             origin: location,
-            header: head,
             event_handle: handle,
+            phantom: PhantomData,
         })
     }
 
-    pub fn close(&self) -> std::io::Result<()> {
-        if self.event_handle.is_null() {
-            return Ok(());
-        }
-
-        let succ = unsafe { CloseHandle(self.event_handle) };
-
-        if succ == 0 {
-            let err: i32 = unsafe { GetLastError() as i32 };
-
-            return Err(std::io::Error::from_raw_os_error(err));
-        }
-
-        if self.origin.is_null() {
-            return Ok(());
-        }
-
-        let succ = unsafe { CloseHandle(self.origin as HANDLE) };
-
-        if succ == 0 {
-            let err: i32 = unsafe { GetLastError() as i32 };
-
-            Err(std::io::Error::from_raw_os_error(err))
-        } else {
-            Ok(())
-        }
+    /// Get the data header
+    ///
+    /// Reads the data header from the shared memory map and returns a copy of the header
+    /// which can be used safely elsewhere.
+    fn read_header(&self) -> Header {
+        let raw_header = self.origin as *const Header;
+        // SAFETY: This read CANNOT be done safely, since it is an unsynchronized clone of a struct
+        // larger than AtomicUsize.
+        unsafe { *raw_header }
     }
 
     ///
@@ -577,7 +568,8 @@ impl Blocking {
     /// use iracing::telemetry::Connection;
     /// use std::time::Duration;
     ///
-    /// let sampler = Connection::new()?.blocking()?;
+    /// let conn = Connection::new()?;
+    /// let sampler = conn.blocking()?;
     /// let sample = sampler.sample(Duration::from_millis(50))?;
     /// # Ok(())
     /// # }
@@ -588,22 +580,39 @@ impl Blocking {
             Err(e) => return Err(Box::new(e)),
         };
 
-        let signal = unsafe { WaitForSingleObject(self.event_handle, wait_time) };
+        unsafe {
+            let signal = WaitForSingleObject(self.event_handle, wait_time);
 
-        match signal {
-            0x80 => Err(Box::new(TelemetryError::ABANDONED)), // Abandoned
-            0x102 => Err(Box::new(TelemetryError::TIMEOUT(wait_time as usize))), // Timeout
-            0xFFFFFFFF => {
-                // Error
-                let errno = unsafe { GetLastError() as i32 };
-                Err(Box::new(std::io::Error::from_raw_os_error(errno)))
+            match signal {
+                0x80 => Err(Box::new(TelemetryError::ABANDONED)), // Abandoned
+                0x102 => Err(Box::new(TelemetryError::TIMEOUT(wait_time as usize))), // Timeout
+                0xFFFFFFFF => {
+                    // Error
+                    let errno = GetLastError() as i32;
+                    Err(Box::new(std::io::Error::from_raw_os_error(errno)))
+                }
+                0x00 => {
+                    // OK
+                    ResetEvent(self.event_handle);
+                    self.read_header().telemetry(self.origin)
+                }
+                _ => Err(Box::new(TelemetryError::UNKNOWN(signal as u32))),
             }
-            0x00 => {
-                // OK
-                unsafe { ResetEvent(self.event_handle) };
-                self.header.telemetry(self.origin)
+        }
+    }
+}
+
+impl<'conn> Drop for Blocking<'conn> {
+    fn drop(&mut self) {
+        unsafe {
+            let succ = CloseHandle(self.event_handle);
+            if succ == 0 {
+                let errno = GetLastError() as i32;
+                panic!(
+                    "Unable to close handle: {}",
+                    std::io::Error::from_raw_os_error(errno)
+                );
             }
-            _ => Err(Box::new(TelemetryError::UNKNOWN(signal as u32))),
         }
     }
 }
@@ -623,6 +632,7 @@ impl Blocking {
 /// let _ = Connection::new().expect("Unable to find telemetry data");
 /// ```
 pub struct Connection {
+    mapping: HANDLE,
     location: *mut c_void,
 }
 
@@ -631,36 +641,22 @@ impl Connection {
         let mut path: Vec<u16> = TELEMETRY_PATH.encode_utf16().collect();
         path.push(0);
 
-        let mapping: HANDLE;
-        let errno: i32;
-
         unsafe {
-            mapping = OpenFileMappingW(FILE_MAP_READ, 0, path.as_ptr());
-        };
-
-        if mapping.is_null() {
-            unsafe {
-                errno = GetLastError() as i32;
+            let mapping: HANDLE = OpenFileMappingW(FILE_MAP_READ, 0, path.as_ptr());
+            if mapping.is_null() {
+                let errno = GetLastError() as i32;
+                return Err(std::io::Error::from_raw_os_error(errno));
             }
 
-            return Err(std::io::Error::from_raw_os_error(errno));
-        }
-
-        let view: LPVOID;
-
-        unsafe {
-            view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
-        }
-
-        if view.is_null() {
-            unsafe {
-                errno = GetLastError() as i32;
+            let location: LPVOID = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+            if location.is_null() {
+                let errno = GetLastError() as i32;
+                CloseHandle(mapping); // Ignore return value; we are already handling another error.
+                return Err(std::io::Error::from_raw_os_error(errno));
             }
 
-            return Err(std::io::Error::from_raw_os_error(errno));
+            Ok(Connection { mapping, location })
         }
-
-        Ok(Connection { location: view })
     }
 
     ///
@@ -668,9 +664,11 @@ impl Connection {
     ///
     /// Reads the data header from the shared memory map and returns a copy of the header
     /// which can be used safely elsewhere.
-    unsafe fn read_header(from: *const c_void) -> Header {
-        let raw_header: *const Header = transmute(from);
-        *raw_header
+    fn read_header(&self) -> Header {
+        let raw_header = self.location as *const Header;
+        // SAFETY: This read CANNOT be done safely, since it is an unsynchronized clone of a struct
+        // larger than AtomicUsize.
+        unsafe { *raw_header }
     }
 
     ///
@@ -689,8 +687,8 @@ impl Connection {
     ///     Err(e) => println!("Invalid Session")
     /// };
     /// ```
-    pub fn session_info(&mut self) -> Result<SessionDetails, Box<dyn std::error::Error>> {
-        let header = unsafe { Self::read_header(self.location) };
+    pub fn session_info(&self) -> Result<SessionDetails, Box<dyn std::error::Error>> {
+        let header = self.read_header();
 
         let start = (self.location as usize + header.session_info_offset as usize) as *const u8;
         let size = header.session_info_length as usize;
@@ -720,7 +718,7 @@ impl Connection {
     /// # }
     /// ```
     pub fn telemetry(&self) -> Result<Sample, Box<dyn std::error::Error>> {
-        let header = unsafe { Self::read_header(self.location) };
+        let header = self.read_header();
         header.telemetry(self.location as *const std::ffi::c_void)
     }
 
@@ -737,24 +735,38 @@ impl Connection {
     /// use iracing::telemetry::Connection;
     /// use std::time::Duration;
     ///
-    /// let sampler = Connection::new()?.blocking()?;
+    /// let conn = Connection::new()?;
+    /// let sampler = conn.blocking()?;
     /// let sample = sampler.sample(Duration::from_millis(50))?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn blocking(&self) -> IOResult<Blocking> {
-        Blocking::new(self.location, unsafe { Self::read_header(self.location) })
+    pub fn blocking(&self) -> IOResult<Blocking<'_>> {
+        Blocking::new(self.location)
     }
+}
 
-    pub fn close(&self) -> IOResult<()> {
-        let succ = unsafe { CloseHandle(self.location) };
+impl Drop for Connection {
+    fn drop(&mut self) {
+        unsafe {
+            let succ = UnmapViewOfFile(self.location);
+            if succ == 0 {
+                let errno = GetLastError() as i32;
+                CloseHandle(self.mapping); // Ignore return value; we are already handling another error.
+                panic!(
+                    "Unable to unmap file: {}",
+                    std::io::Error::from_raw_os_error(errno)
+                );
+            }
 
-        if succ != 0 {
-            Ok(())
-        } else {
-            let errno: i32 = unsafe { GetLastError() as i32 };
-
-            Err(std::io::Error::from_raw_os_error(errno))
+            let succ = CloseHandle(self.mapping);
+            if succ == 0 {
+                let errno = GetLastError() as i32;
+                panic!(
+                    "Unable to close handle: {}",
+                    std::io::Error::from_raw_os_error(errno)
+                );
+            }
         }
     }
 }
