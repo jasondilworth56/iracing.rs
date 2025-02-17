@@ -3,6 +3,7 @@ use encoding_rs::mem::decode_latin1;
 use serde::{Deserialize, Serialize};
 use serde_yaml::from_str as yaml_from;
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::default::Default;
 use std::ffi::CStr;
@@ -196,66 +197,92 @@ impl Value {
     }
 }
 
-impl TryInto<i32> for Value {
-    type Error = ValueError;
+impl TryFrom<Value> for i32 {
+    type Error = &'static str;
 
-    fn try_into(self) -> Result<i32, Self::Error> {
-        match self {
-            Self::INT(n) => Ok(n),
-            _ => Err(ValueError::TryInto("Value is not a signed 4-byte integer")),
-        }
-    }
-}
-
-impl TryInto<u32> for Value {
-    type Error = ValueError;
-
-    fn try_into(self) -> Result<u32, Self::Error> {
-        match self {
-            Self::INT(n) => Ok(n as u32),
-            Self::BITS(n) => Ok(n),
-            _ => Err(ValueError::TryInto("Value is not a 4-byte integer")),
-        }
-    }
-}
-
-impl TryInto<f32> for Value {
-    type Error = ValueError;
-
-    fn try_into(self) -> Result<f32, Self::Error> {
-        match self {
-            Self::FLOAT(n) => Ok(n),
-            _ => Err(ValueError::TryInto("Value is not a float")),
-        }
-    }
-}
-
-impl TryInto<f64> for Value {
-    type Error = ValueError;
-
-    fn try_into(self) -> Result<f64, Self::Error> {
-        match self {
-            Self::DOUBLE(n) => Ok(n),
-            Self::FLOAT(f) => Ok(f as f64),
-            _ => Err(ValueError::TryInto("Value is not a float or double")),
-        }
-    }
-}
-
-impl From<Value> for bool {
-    fn from(value: Value) -> Self {
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::BOOL(b) => b,
-            _ => false,
+            Value::INT(i) => Ok(i),
+            _ => Err("Value is not an i32"),
         }
     }
 }
 
-impl From<Value> for Vec<bool> {
-    fn from(value: Value) -> Self {
+impl TryFrom<Value> for u32 {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::BoolVec(b) => b,
-            _ => vec![false],
+            Value::BITS(u) => Ok(u),
+            Value::INT(i) if i >= 0 => Ok(i as u32),
+            _ => Err("Value is not a u32"),
+        }
+    }
+}
+
+impl TryFrom<Value> for f32 {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::FLOAT(f) => Ok(f),
+            _ => Err("Value is not an f32"),
+        }
+    }
+}
+
+impl TryFrom<Value> for f64 {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::DOUBLE(f) => Ok(f),
+            Value::FLOAT(f) => Ok(f as f64),
+            _ => Err("Value is not an f64"),
+        }
+    }
+}
+
+impl TryFrom<Value> for bool {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::BOOL(b) => Ok(b),
+            _ => Err("Value is not a bool"),
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<i32> {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::IntVec(v) => Ok(v),
+            _ => Err("Value is not an IntVec"),
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<f32> {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::FloatVec(v) => Ok(v),
+            _ => Err("Value is not a FloatVec"),
+        }
+    }
+}
+
+impl TryFrom<Value> for Vec<bool> {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::BoolVec(v) => Ok(v),
+            _ => Err("Value is not a BoolVec"),
         }
     }
 }
