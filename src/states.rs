@@ -1,6 +1,7 @@
 use bitflags::bitflags;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum SessionState {
     Invalid(i32),
     GetInCar,
@@ -29,7 +30,7 @@ bitflags! {
     ///
     /// Current warnings / status flags of the player's engine.
     ///
-    #[derive(Default)]
+    #[derive(Default, Serialize, Deserialize)]
     pub struct EngineWarnings: u32 {
         /// Water Temperature too high
         const WATER_TEMPERATURE = 0x01;
@@ -62,7 +63,7 @@ bitflags! {
     ///
     /// let very_scenic = CameraState::UI_HIDDEN | CameraState::IS_SCENIC_ACTIVE;
     /// ```
-    #[derive(Default)]
+    #[derive(Default, Serialize, Deserialize)]
     pub struct CameraState: u32 {
         const IS_SESSION_SCREEN = 0x01;
         const IS_SCENIC_ACTIVE = 0x02;
@@ -80,7 +81,7 @@ bitflags! {
 bitflags! {
     ///
     /// Bitfield of requested services for the next pitstop.
-    #[derive(Default)]
+    #[derive(Default, Serialize, Deserialize)]
     pub struct PitServices: u32 {
         const CHANGE_LEFT_FRONT = 0x01;
         const CHANGE_RIGHT_FRONT = 0x02;
@@ -93,7 +94,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, Serialize, Deserialize)]
     pub struct Flags: u32 {
         const CHECKERED_FLAG = 0x01;
         const WHITE_FLAG = 1 << 1;
@@ -128,7 +129,7 @@ bitflags! {
 /**
  * Action which will be initiated by the "RESET" button
  */
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum ResetAction {
     Enter,
     Exit,
@@ -144,7 +145,7 @@ impl Default for ResetAction {
 /**
  * Current units being displayed
  */
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum Units {
     Imperial,
     Metric,
