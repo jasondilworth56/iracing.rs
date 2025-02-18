@@ -405,15 +405,6 @@ impl Sample {
         }
     }
 
-    fn header_for(&self, name: &'static str) -> Option<ValueHeader> {
-        for v in self.values.iter() {
-            if v.name() == name {
-                return Some(v.clone());
-            }
-        }
-        None
-    }
-
     ///
     /// Check if a given variable is available in the telemetry sample
     pub fn has(&self, name: &'static str) -> bool {
