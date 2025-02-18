@@ -3,12 +3,14 @@ use encoding_rs::mem::decode_latin1;
 use serde::{Deserialize, Serialize};
 use serde_yaml::from_str as yaml_from;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::default::Default;
 use std::ffi::CStr;
 use std::fmt;
 use std::io::Result as IOResult;
+use std::iter::FromIterator;
 use std::marker::PhantomData;
 use std::os::raw::{c_char, c_void};
 use std::os::windows::raw::HANDLE;
@@ -104,6 +106,7 @@ pub struct Sample {
     tick: i32,
     buffer: Vec<u8>,
     values: Vec<ValueHeader>,
+    header_map: HashMap<String, ValueHeader>,
 }
 
 /// Telemetry Value
@@ -388,28 +391,24 @@ impl Header {
     }
 }
 
+fn create_header_hashmap(header: &Vec<ValueHeader>) -> HashMap<String, ValueHeader> {
+    HashMap::from_iter(header.iter().map(|v| (String::from(v.name()), v.clone())))
+}
+
 impl Sample {
     fn new(tick: i32, header: Vec<ValueHeader>, buffer: Vec<u8>) -> Self {
         Sample {
             tick,
-            values: header,
             buffer,
+            header_map: create_header_hashmap(&header),
+            values: header,
         }
-    }
-
-    fn header_for(&self, name: &'static str) -> Option<ValueHeader> {
-        for v in self.values.iter() {
-            if v.name() == name {
-                return Some(v.clone());
-            }
-        }
-        None
     }
 
     ///
     /// Check if a given variable is available in the telemetry sample
     pub fn has(&self, name: &'static str) -> bool {
-        self.header_for(name).is_some()
+        self.header_map.contains_key(name)
     }
 
     /// Gets all values in the same along with names and descriptions.
@@ -450,9 +449,9 @@ impl Sample {
     /// `name`  Name of the telemetry variable to get
     ///   - see the iRacing Telemtry documentation for a complete list of possible values
     pub fn get(&self, name: &'static str) -> Result<Value, SampleError> {
-        match self.header_for(name) {
+        match self.header_map.get(name) {
             None => Err(SampleError::NoValue(format!("No value '{}' found", name))),
-            Some(vh) => Ok(self.value(&vh)),
+            Some(v) => Ok(self.value(v)),
         }
     }
 
