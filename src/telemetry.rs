@@ -417,7 +417,7 @@ impl Sample {
     ///
     /// Check if a given variable is available in the telemetry sample
     pub fn has(&self, name: &'static str) -> bool {
-        self.header_for(name).is_some()
+        self.header_map.contains_key(name)
     }
 
     /// Gets all values in the same along with names and descriptions.
@@ -458,9 +458,9 @@ impl Sample {
     /// `name`  Name of the telemetry variable to get
     ///   - see the iRacing Telemtry documentation for a complete list of possible values
     pub fn get(&self, name: &'static str) -> Result<Value, SampleError> {
-        match self.header_for(name) {
+        match self.header_map.get(name) {
             None => Err(SampleError::NoValue(format!("No value '{}' found", name))),
-            Some(vh) => Ok(self.value(&vh)),
+            Some(v) => Ok(self.value(v)),
         }
     }
 
