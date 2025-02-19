@@ -405,6 +405,11 @@ impl Sample {
         }
     }
 
+    /// Get the current tick
+    pub fn tick(&self) -> i32 {
+        self.tick
+    }
+
     ///
     /// Check if a given variable is available in the telemetry sample
     pub fn has(&self, name: &'static str) -> bool {
