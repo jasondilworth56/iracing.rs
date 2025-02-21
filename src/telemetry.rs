@@ -438,8 +438,7 @@ impl Sample {
 
         let raw_val = &self.buffer[vs..ve];
 
-        let v: Value;
-        v = match vt {
+        let v: Value = match vt {
             Value::INT(_) => {
                 if vc == 1 {
                     Value::INT(i32::from_le_bytes(raw_val.try_into().unwrap()))
@@ -475,7 +474,7 @@ impl Sample {
             }
             Value::DOUBLE(_) => Value::DOUBLE(f64::from_le_bytes(raw_val.try_into().unwrap())),
             Value::BITS(_) => Value::BITS(u32::from_le_bytes(raw_val.try_into().unwrap())),
-            Value::CHAR(_) => Value::CHAR(raw_val[0] as u8),
+            Value::CHAR(_) => Value::CHAR(raw_val[0]),
             Value::BOOL(_) => {
                 if vc == 1 {
                     Value::BOOL(raw_val[0] > 0)
@@ -539,8 +538,8 @@ pub enum SampleError {
     NoValue(String),
 }
 
-impl<'conn> Blocking<'conn> {
-    fn new(location: *const c_void) -> IOResult<Self> {
+impl Blocking<'_> {
+    fn new(location: *const c_void) -> std::io::Result<Self> {
         let mut event_name: Vec<u16> = DATA_EVENT_NAME.encode_utf16().collect();
         event_name.push(0);
 
@@ -617,7 +616,7 @@ impl<'conn> Blocking<'conn> {
     }
 }
 
-impl<'conn> Drop for Blocking<'conn> {
+impl Drop for Blocking<'_> {
     fn drop(&mut self) {
         unsafe {
             let succ = CloseHandle(self.event_handle);
@@ -800,7 +799,7 @@ mod tests {
 
     #[test]
     fn test_latest_telemetry() {
-        let session_tick: u32 = Connection::new()
+        let session_tick: Sample = Connection::new()
             .expect("Unable to open telemetry")
             .telemetry();
     }
