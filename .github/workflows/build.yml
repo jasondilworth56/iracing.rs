@@ -1,25 +1,25 @@
 name: Build & Test
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   build:
-
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Lint
-      run: cargo clippy --tests --examples --all-features
-    - name: Formatting
-      run: cargo fmt -- --check
-    - name: Docs build
-      run: cargo doc --no-deps --all-features
-    - name: Build
-      run: cargo build --release --examples --verbose --all-features
-    - name: Check Tests Compile (don't run because we'd need iRacing running for that)
-      run: cargo test --verbose --lib --no-run --all-features
+      - uses: actions/checkout@v2
+      - name: Lint
+        run: cargo clippy --tests --examples --all-features
+      - name: Formatting
+        run: cargo fmt -- --check
+      - name: Docs build
+        run: cargo doc --no-deps --all-features
+      - name: Build
+        run: cargo build --release --examples --verbose --all-features
+      - name: Check Tests Compile (don't run because we'd need iRacing running for that)
+        run: cargo test --verbose --lib --no-run --all-features
