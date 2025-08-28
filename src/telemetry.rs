@@ -292,6 +292,17 @@ impl TryFrom<Value> for Vec<i32> {
     }
 }
 
+impl TryFrom<Value> for Vec<u32> {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::IntVec(v) => Ok(v),
+            _ => Err("Value is not an IntVec"),
+        }
+    }
+}
+
 impl TryFrom<Value> for Vec<f32> {
     type Error = &'static str;
 
