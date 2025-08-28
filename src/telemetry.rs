@@ -169,6 +169,7 @@ pub enum Value {
     DOUBLE(f64),
     UNKNOWN(()),
     IntVec(Vec<i32>),
+    UIntVec(Vec<u32>),
     FloatVec(Vec<f32>),
     BoolVec(Vec<bool>),
 }
@@ -191,22 +192,11 @@ impl Value {
     pub fn size(&self) -> usize {
         match self {
             Self::CHAR(_) | Self::BOOL(_) | Self::BoolVec(_) => 1,
-            Self::INT(_) | Self::BITS(_) | Self::FLOAT(_) | Self::IntVec(_) | Self::FloatVec(_) => {
+            Self::INT(_) | Self::BITS(_) | Self::FLOAT(_) | Self::IntVec(_) | Self::UIntVec(_) | Self::FloatVec(_) => {
                 4
             }
             Self::DOUBLE(_) => 8,
             Self::UNKNOWN(_) => 1,
-        }
-    }
-}
-
-impl TryFrom<Value> for i32 {
-    type Error = &'static str;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::INT(i) => Ok(i),
-            _ => Err("Value is not an i32"),
         }
     }
 }
@@ -228,8 +218,8 @@ impl TryFrom<Value> for i32 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::BITS(u) => Ok(u),
-            Value::INT(i) if i >= 0 => Ok(i as i32),
+            Value::BITS(u) => Ok(u as i32),
+            Value::INT(i) if i >= 0 => Ok(i),
             _ => Err("Value is not a i32"),
         }
     }
@@ -240,7 +230,7 @@ impl TryFrom<Value> for i64 {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::BITS(u) => Ok(u),
+            Value::BITS(u) => Ok(u as i64),
             Value::INT(i) if i >= 0 => Ok(i as i64),
             _ => Err("Value is not a i64"),
         }
@@ -297,8 +287,8 @@ impl TryFrom<Value> for Vec<u32> {
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
-            Value::IntVec(v) => Ok(v),
-            _ => Err("Value is not an IntVec"),
+            Value::UIntVec(v) => Ok(v),
+            _ => Err("Value is not an UIntVec"),
         }
     }
 }
@@ -426,8 +416,8 @@ impl Header {
     }
 }
 
-fn create_header_hashmap(header: &Vec<ValueHeader>) -> HashMap<String, ValueHeader> {
-    HashMap::from_iter(header.iter().map(|v| (String::from(v.name()), v.clone())))
+fn create_header_hashmap(header: &[ValueHeader]) -> HashMap<String, ValueHeader> {
+    HashMap::from_iter(header.iter().map(|v| (v.name(), v.clone())))
 }
 
 impl Sample {
@@ -539,7 +529,17 @@ impl Sample {
                 }
             }
             Value::DOUBLE(_) => Value::DOUBLE(f64::from_le_bytes(raw_val.try_into().unwrap())),
-            Value::BITS(_) => Value::BITS(u32::from_le_bytes(raw_val.try_into().unwrap())),
+            Value::BITS(_) => {
+                if vc == 1 {
+                    Value::BITS(u32::from_le_bytes(raw_val.try_into().unwrap()))
+                } else {
+                    let mut values: Vec<u32> = Vec::with_capacity(vc);
+                    for i in 0..vc - 1 {
+                        values.push(u32::from_le_bytes(raw_val.try_into().unwrap()));
+                    }
+                    Value::UIntVec(values)
+                }
+            }
             Value::CHAR(_) => Value::CHAR(raw_val[0]),
             Value::BOOL(_) => {
                 if vc == 1 {
@@ -604,7 +604,7 @@ pub enum SampleError {
     NoValue(String),
 }
 
-impl<'conn> Blocking<'conn> {
+impl Blocking<'_> {
     fn new(location: *const c_void) -> IOResult<Self> {
         let mut event_name: Vec<u16> = DATA_EVENT_NAME.encode_utf16().collect();
         event_name.push(0);
@@ -682,7 +682,7 @@ impl<'conn> Blocking<'conn> {
     }
 }
 
-impl<'conn> Drop for Blocking<'conn> {
+impl Drop for Blocking<'_> {
     fn drop(&mut self) {
         unsafe {
             let succ = CloseHandle(self.event_handle);
@@ -865,7 +865,7 @@ mod tests {
 
     #[test]
     fn test_latest_telemetry() {
-        let session_tick: u32 = Connection::new()
+        let session_tick: Sample = Connection::new()
             .expect("Unable to open telemetry")
             .telemetry();
     }
