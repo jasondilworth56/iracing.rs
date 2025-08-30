@@ -201,6 +201,19 @@ impl Value {
     }
 }
 
+impl TryFrom<Value> for i32 {
+    type Error = &'static str;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::INT(i) => Ok(i),
+            Value::BITS(u) if u <= i32::MAX as u32 => Ok(u as i32),
+            Value::CHAR(c) => Ok(c as i32),
+            _ => Err("Value is not an i32"),
+        }
+    }
+}
+
 impl TryFrom<Value> for u32 {
     type Error = &'static str;
 
@@ -208,19 +221,8 @@ impl TryFrom<Value> for u32 {
         match value {
             Value::BITS(u) => Ok(u),
             Value::INT(i) if i >= 0 => Ok(i as u32),
+            Value::CHAR(c) => Ok(c as u32),
             _ => Err("Value is not a u32"),
-        }
-    }
-}
-
-impl TryFrom<Value> for i32 {
-    type Error = &'static str;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::BITS(u) => Ok(u as i32),
-            Value::INT(i) if i >= 0 => Ok(i),
-            _ => Err("Value is not a i32"),
         }
     }
 }
